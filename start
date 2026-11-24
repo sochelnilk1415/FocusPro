@@ -1,0 +1,104 @@
+blank
+import asyncio
+import os
+from pathlib import Path
+
+from opentele.td import TDesktop
+from opentele.tl import TelegramClient
+from opentele.api import UseCurrentSession
+from telethon.sessions import StringSession
+
+# === Настройки ===
+SESSIONS_DIR = Path(r"C:\Users\max\Downloads\Kimi_Agent_Skibidi\app\sessions")
+OUTPUT_DIR = Path(__file__).parent / "tdata_output"   # куда сохранять tdata
+# =================
+
+def list_sessions():
+    if not SESSIONS_DIR.exists():
+        print(f"[!] Папка не найдена: {SESSIONS_DIR}")
+        return []
+
+    sessions = sorted([
+        f for f in SESSIONS_DIR.glob("*.session")
+        if f.is_file()
+    ])
+    return sessions
+
+async def convert_session(session_path: Path):
+    session_name = session_path.stem
+    output_folder = OUTPUT_DIR / f"tdata_{session_name}"
+
+    print(f"\n[*] Конвертирую: {session_path.name}")
+    print(f"[*] Результат будет в: {output_folder}")
+
+    client = None
+    try:
+        # Telethon использует как SQLite-сессии, так и StringSession.
+        # Текстовую StringSession нельзя передавать как путь к SQLite.
+        with session_path.open("rb") as session_file:
+            is_sqlite = session_file.read(16) == b"SQLite format 3\x00"
+
+        if is_sqlite:
+            session = str(session_path)
+            session_type = "SQLite"
+        else:
+            session_string = session_path.read_text(encoding="utf-8-sig").strip()
+            if not session_string:
+                raise ValueError("Файл сессии пуст")
+            session = StringSession(session_string)
+            session_type = "StringSession"
+
+        print(f"[*] Формат сессии: {session_type}")
+        client = TelegramClient(session)
+
+        # UseCurrentSession = без перелогина, просто копируем ключ
+        tdesk = await client.ToTDesktop(flag=UseCurrentSession)
+        tdesk.SaveTData(str(output_folder))
+        print(f"[+] Успешно! tdata сохранена в:\n    {output_folder}")
+        return True
+    except Exception as e:
+        print(f"[!] Ошибка при конвертации: {type(e).__name__}: {e}")
+        return False
+    finally:
+        if client is not None:
+            await client.disconnect()
+
+async def main():
+    sessions = list_sessions()
+
+    if not sessions:
+        print("В папке нет .session файлов.")
+        return
+
+    print("=" * 60)
+    print("Найденные Telethon-сессии:")
+    print("=" * 60)
+    for i, s in enumerate(sessions, 1):
+        size = s.stat().st_size // 1024
+        print(f"  {i:2d}. {s.name}  ({size} KB)")
+    print("=" * 60)
+    print("  0. Выход")
+    print()
+
+    while True:
+        try:
+            choice = input("Выбери номер сессии: ").strip()
+            if choice == "0":
+                print("Выход.")
+                return
+
+            idx = int(choice) - 1
+            if 0 <= idx < len(sessions):
+                selected = sessions[idx]
+                break
+            else:
+                print("Неверный номер, попробуй ещё раз.")
+        except ValueError:
+            print("Введи число.")
+
+    OUTPUT_DIR.mkdir(exist_ok=True)
+    await convert_session(selected)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
